@@ -1,0 +1,17 @@
+<div id="plugins">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Description</th>
+        <th>WASM URL</th>
+        <th>Delete</th>
+      </tr>
+    </thead>
+    <tbody id="plugins-content">
+      {% for plugin in plugins %}
+      {% include "plugin.html" %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

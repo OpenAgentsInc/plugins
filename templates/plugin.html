@@ -1,0 +1,7 @@
+<tr id="shuttle-plugin-{{ plugin.id }}">
+  <td> {{ plugin.id }} </td>
+  <td id="shuttle-plugin-desc-{{plugin.id}}"> {{ plugin.description }} </td>
+  <td id="shuttle-plugin-url-{{plugin.id}}"> {{ plugin.wasm_url }} </td>
+  <td><button hx-delete="/plugins/{{plugin.id}}" hx-trigger="click" hx-target="#shuttle-plugin-{{plugin.id}}"
+      hx-swap="delete">Delete</button></td>
+</tr>

@@ -16,6 +16,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt as _};
 
 pub type TodosStream = Sender<TodoUpdate>;
+pub type PluginsStream = Sender<PluginUpdate>;
 
 #[derive(Clone, Serialize, Debug)]
 pub enum MutationKind {
@@ -28,6 +29,13 @@ pub struct TodoUpdate {
     mutation_kind: MutationKind,
     id: i32,
 }
+
+#[derive(Clone, Serialize, Debug)]
+pub struct PluginUpdate {
+    mutation_kind: MutationKind,
+    id: i32,
+}
+
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct Todo {
     id: i32,
@@ -44,6 +52,19 @@ struct AppState {
     db: PgPool,
 }
 
+#[derive(sqlx::FromRow, Serialize, Deserialize)]
+struct Plugin {
+    id: i32,
+    description: String,
+    wasm_url: String,
+}
+
+#[derive(sqlx::FromRow, Serialize, Deserialize)]
+struct PluginNew {
+    description: String,
+    wasm_url: String,
+}
+
 #[shuttle_runtime::main]
 async fn main(#[shuttle_shared_db::Postgres] db: PgPool) -> shuttle_axum::ShuttleAxum {
     sqlx::migrate!()
@@ -51,7 +72,8 @@ async fn main(#[shuttle_shared_db::Postgres] db: PgPool) -> shuttle_axum::Shuttl
         .await
         .expect("Looks like something went wrong with migrations :(");
 
-    let (tx, _rx) = channel::<TodoUpdate>(10);
+    let (todo_tx, _todo_rx) = channel::<TodoUpdate>(10);
+    let (plugin_tx, _plugin_rx) = channel::<PluginUpdate>(10);
     let state = AppState { db };
 
     let router = Router::new()
@@ -61,8 +83,12 @@ async fn main(#[shuttle_shared_db::Postgres] db: PgPool) -> shuttle_axum::Shuttl
         .route("/todos", get(fetch_todos).post(create_todo))
         .route("/todos/:id", delete(delete_todo))
         .route("/todos/stream", get(handle_stream))
+        .route("/plugins", get(fetch_plugins).post(create_plugin))
+        .route("/plugins/:id", delete(delete_plugin))
+        .route("/plugins/stream", get(handle_plugin_stream))
         .with_state(state)
-        .layer(Extension(tx));
+        .layer(Extension(todo_tx))
+        .layer(Extension(plugin_tx));
 
     Ok(router.into())
 }
@@ -82,6 +108,15 @@ async fn fetch_todos(State(state): State<AppState>) -> impl IntoResponse {
         .unwrap();
 
     Records { todos }
+}
+
+async fn fetch_plugins(State(state): State<AppState>) -> impl IntoResponse {
+    let plugins = sqlx::query_as::<_, Plugin>("SELECT * FROM PLUGINS")
+        .fetch_all(&state.db)
+        .await
+        .unwrap();
+
+    PluginRecords { plugins }
 }
 
 pub async fn styles() -> impl IntoResponse {
@@ -121,6 +156,36 @@ async fn create_todo(
     TodoNewTemplate { todo }
 }
 
+async fn create_plugin(
+    State(state): State<AppState>,
+    Extension(tx): Extension<PluginsStream>,
+    Form(form): Form<PluginNew>,
+) -> impl IntoResponse {
+    let plugin = sqlx::query_as::<_, Plugin>(
+      "INSERT INTO PLUGINS (description, wasm_url) VALUES ($1, $2) RETURNING id, description, wasm_url",
+  )
+  .bind(form.description)
+  .bind(form.wasm_url)
+  .fetch_one(&state.db)
+  .await
+  .unwrap();
+
+    if tx
+        .send(PluginUpdate {
+            mutation_kind: MutationKind::Create,
+            id: plugin.id,
+        })
+        .is_err()
+    {
+        eprintln!(
+            "Record with ID {} was created but nobody's listening to the stream!",
+            plugin.id
+        );
+    }
+
+    PluginNewTemplate { plugin }
+}
+
 async fn delete_todo(
     State(state): State<AppState>,
     Path(id): Path<i32>,
@@ -134,6 +199,33 @@ async fn delete_todo(
 
     if tx
         .send(TodoUpdate {
+            mutation_kind: MutationKind::Delete,
+            id,
+        })
+        .is_err()
+    {
+        eprintln!(
+            "Record with ID {} was deleted but nobody's listening to the stream!",
+            id
+        );
+    }
+
+    StatusCode::OK
+}
+
+async fn delete_plugin(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    Extension(tx): Extension<PluginsStream>,
+) -> impl IntoResponse {
+    sqlx::query("DELETE FROM PLUGINS WHERE ID = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+    if tx
+        .send(PluginUpdate {
             mutation_kind: MutationKind::Delete,
             id,
         })
@@ -163,13 +255,48 @@ struct Records {
 }
 
 #[derive(Template)]
+#[template(path = "plugins.html")]
+struct PluginRecords {
+    plugins: Vec<Plugin>,
+}
+
+#[derive(Template)]
 #[template(path = "todo.html")]
 struct TodoNewTemplate {
     todo: Todo,
 }
 
+#[derive(Template)]
+#[template(path = "plugin.html")]
+struct PluginNewTemplate {
+    plugin: Plugin,
+}
+
 pub async fn handle_stream(
     Extension(tx): Extension<TodosStream>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let rx = tx.subscribe();
+
+    let stream = BroadcastStream::new(rx);
+
+    Sse::new(
+        stream
+            .map(|msg| {
+                let msg = msg.unwrap();
+                let json = format!("<div>{}</div>", json!(msg));
+                Event::default().data(json)
+            })
+            .map(Ok),
+    )
+    .keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(600))
+            .text("keep-alive-text"),
+    )
+}
+
+pub async fn handle_plugin_stream(
+    Extension(tx): Extension<PluginsStream>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = tx.subscribe();
 
