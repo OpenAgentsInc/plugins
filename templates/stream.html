@@ -3,9 +3,6 @@
 {% block title %} Index {% endblock %}
 
 {% block content %}
-<div hx-sse="connect:/todos/stream swap:message" hx-swap="beforeend">
-  <div></div>
-</div>
 <div hx-sse="connect:/plugins/stream swap:message" hx-swap="beforeend">
   <div></div>
 </div>
