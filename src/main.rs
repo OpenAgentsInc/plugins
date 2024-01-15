@@ -2,7 +2,7 @@ use askama::Template;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::{sse::Event, IntoResponse, Sse, Response},
+    response::{sse::Event, IntoResponse, Response, Sse},
     routing::{delete, get},
     Extension, Form, Router,
 };
@@ -57,7 +57,7 @@ async fn main(#[shuttle_shared_db::Postgres] db: PgPool) -> shuttle_axum::Shuttl
     let router = Router::new()
         .route("/", get(home))
         .route("/stream", get(stream))
-	.route("/styles.css", get(styles))
+        .route("/styles.css", get(styles))
         .route("/todos", get(fetch_todos).post(create_todo))
         .route("/todos/:id", delete(delete_todo))
         .route("/todos/stream", get(handle_stream))
@@ -90,7 +90,6 @@ pub async fn styles() -> impl IntoResponse {
         .header("Content-Type", "text/css")
         .body(include_str!("../templates/styles.css").to_owned())
         .unwrap()
-
 }
 
 async fn create_todo(
@@ -106,12 +105,18 @@ async fn create_todo(
     .await
     .unwrap();
 
-     if tx.send(TodoUpdate {
-	        mutation_kind: MutationKind::Create,
-	        id: todo.id,
-	    }).is_err() {
-		eprintln!("Record with ID {} was created but nobody's listening to the stream!", todo.id);
-	}
+    if tx
+        .send(TodoUpdate {
+            mutation_kind: MutationKind::Create,
+            id: todo.id,
+        })
+        .is_err()
+    {
+        eprintln!(
+            "Record with ID {} was created but nobody's listening to the stream!",
+            todo.id
+        );
+    }
 
     TodoNewTemplate { todo }
 }
@@ -126,13 +131,19 @@ async fn delete_todo(
         .execute(&state.db)
         .await
         .unwrap();
-	
-     if tx.send(TodoUpdate {
-	        mutation_kind: MutationKind::Delete,
-	        id,
-	    }).is_err() {
-		eprintln!("Record with ID {} was deleted but nobody's listening to the stream!", id);
-	}
+
+    if tx
+        .send(TodoUpdate {
+            mutation_kind: MutationKind::Delete,
+            id,
+        })
+        .is_err()
+    {
+        eprintln!(
+            "Record with ID {} was deleted but nobody's listening to the stream!",
+            id
+        );
+    }
 
     StatusCode::OK
 }
