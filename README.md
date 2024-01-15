@@ -2,6 +2,11 @@
 
 A web app to list OpenAgents plugins
 
+## Tech stack
+- Rust
+- HTMX
+- Axum
+- Shuttle
 
 ## Running locally
 
